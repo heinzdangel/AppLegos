@@ -21,7 +21,6 @@ if (pagesMode && configuredOrigin) {
 }
 let pagesToken = '';
 let pagesLoginWindow;
-let otpEmail = '';
 let refreshToken = '';
 let sessionExpires = 0;
 let refreshingToken;
@@ -244,6 +243,7 @@ async function supabaseAuth(path, body) {
   if (!response.ok) {
     const error = new Error(result.msg || result.error_description || 'No se pudo completar el acceso.');
     error.status = response.status;
+    error.code = result.error_code;
     throw error;
   }
   return result;
@@ -434,12 +434,10 @@ function renderAccess(login) {
   shell.hidden = true;
   access.hidden = false;
   access.innerHTML = `<section class="access-card"><img src="./icon.svg" alt="" width="60" height="60">
-    <h1>Inventario LEGO</h1>${login && supabase ? (otpEmail ?
-    `<form data-form="supabase-otp"><p>Introduce el código enviado a ${html(otpEmail)}.</p>
-      <label>Código de acceso<input name="token" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" required></label>
-      <button class="primary">Entrar</button><button type="button" data-action="supabase-change-email">Volver</button></form>` :
-    `<form data-form="supabase-email"><label>Correo de acceso<input type="email" name="email" autocomplete="email" required></label>
-      <button class="primary">Enviar código</button></form>`) : login && pagesMode ?
+    <h1>Inventario LEGO</h1>${login && supabase ?
+    `<form data-form="supabase-password"><label>Correo de acceso<input type="email" name="email" autocomplete="username" required></label>
+      <label>Contraseña<input type="password" name="password" autocomplete="current-password" required></label>
+      <button class="primary">Entrar</button></form>` : login && pagesMode ?
     '<button class="primary" type="button" data-action="pages-login">Entrar a mi inventario</button>' : login ?
     `<form data-form="login"><label>Contraseña de la colección<input type="password" name="password" autocomplete="current-password" required></label><button class="primary">Entrar</button></form>` : pagesMode && !serverOrigin ?
     '<p>Completa la configuración de acceso en docs/config.js.</p>' :
@@ -1165,10 +1163,6 @@ document.addEventListener('click', async event => {
       pagesLoginWindow = window.open(serverOrigin + '/pages-login', 'inventario-lego-acceso', 'popup,width=470,height=430');
       if (!pagesLoginWindow) showNotice('Permite la ventana de acceso para entrar al inventario.', true);
       break;
-    case 'supabase-change-email':
-      otpEmail = '';
-      renderAccess(true);
-      break;
     case 'logout':
       try {
         if (!pagesMode) await api('/api/logout', {});
@@ -1188,22 +1182,22 @@ document.addEventListener('submit', async event => {
   event.preventDefault();
   const input = new FormData(form);
   const mode = form.dataset.form;
-  if (mode === 'supabase-email' || mode === 'supabase-otp') {
+  if (mode === 'supabase-password') {
     const submit = form.querySelector('button');
+    if (submit.disabled) return;
     submit.disabled = true;
     try {
-      if (mode === 'supabase-email') {
-        const email = input.get('email').trim();
-        await supabaseAuth('otp', { email, create_user: false });
-        otpEmail = email;
-        renderAccess(true);
-      } else {
-        useSupabaseSession(await supabaseAuth('verify', { email: otpEmail, token: input.get('token'), type: 'email' }));
-        otpEmail = '';
-        await refresh(true);
-      }
+      const email = input.get('email').trim();
+      const password = input.get('password');
+      useSupabaseSession(await supabaseAuth('token?grant_type=password', { email, password }));
+      form.reset();
+      await refresh(true);
     } catch (error) {
-      showNotice(error.message, true);
+      const messages = {
+        invalid_credentials: 'El correo o la contraseña son incorrectos.',
+        email_not_confirmed: 'Confirma este usuario en Authentication → Users de Supabase para poder entrar.',
+      };
+      showNotice(messages[error.code] || error.message, true);
     } finally {
       submit.disabled = false;
     }
