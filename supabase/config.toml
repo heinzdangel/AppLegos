@@ -1,0 +1,5 @@
+project_id = "inventario-lego"
+
+[functions.lego]
+verify_jwt = false
+entrypoint = "./functions/lego/index.mjs"

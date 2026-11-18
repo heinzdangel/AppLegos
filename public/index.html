@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f4ee">
+  <meta name="description" content="Inventario de sets, cajas y piezas LEGO.">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./styles.css">
+  <title>Inventario LEGO</title>
+  <script defer src="./config.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <div class="shell" id="shell" hidden>
+    <aside class="sidebar">
+      <button class="brand" type="button" data-action="page" data-value="sets">
+        <img src="./icon.svg" alt="" width="43" height="43">
+        <span>Inventario<br><strong>LEGO</strong></span>
+      </button>
+      <nav aria-label="Inventario">
+        <button type="button" data-action="page" data-value="sets"><span aria-hidden="true">▦</span>Mis sets</button>
+        <button type="button" data-action="page" data-value="pieces"><span aria-hidden="true">◇</span>Piezas</button>
+        <button type="button" data-action="page" data-value="boxes"><span aria-hidden="true">▤</span>Cajas</button>
+        <button type="button" data-action="page" data-value="missing"><span aria-hidden="true">◫</span>Faltantes <small id="missing-badge" hidden></small></button>
+        <button type="button" data-action="page" data-value="stats"><span aria-hidden="true">▥</span>Estadísticas</button>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="connection"><i></i>Conectando</span>
+        <button type="button" data-action="logout" id="logout" hidden>Salir</button>
+      </div>
+    </aside>
+    <main id="page"></main>
+  </div>
+  <main class="access" id="access"><p>Abriendo el inventario…</p></main>
+  <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <dialog id="dialog"><div id="dialog-content"></div></dialog>
+</body>
+</html>

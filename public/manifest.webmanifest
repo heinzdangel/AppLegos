@@ -1,0 +1,15 @@
+{
+  "id": "./",
+  "name": "Inventario LEGO",
+  "short_name": "Mis LEGO",
+  "description": "Revisa sets, cuenta piezas y consulta faltantes.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "lang": "es",
+  "background_color": "#f5f4ee",
+  "theme_color": "#f5f4ee",
+  "icons": [
+    { "src": "./icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" }
+  ]
+}

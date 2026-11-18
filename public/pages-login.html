@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acceso a Inventario LEGO</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script defer src="/pages-login.js"></script>
+</head>
+<body>
+  <main class="access">
+    <section class="access-card">
+      <img src="/icon.svg" width="60" height="60" alt="">
+      <h1>Inventario LEGO</h1>
+      <form id="pages-login" method="post" action="/api/login">
+        <label>Contraseña de la colección
+          <input type="password" name="password" autocomplete="current-password" autofocus required>
+        </label>
+        <button class="primary" type="submit">Entrar</button>
+      </form>
+      <p id="login-error" role="alert" hidden></p>
+    </section>
+  </main>
+</body>
+</html>
