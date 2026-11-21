@@ -155,12 +155,28 @@ export function addSet(state, catalogId, name) {
   const code = setCode(inventory.number);
   const sameCode = new Set(state.catalog.filter(entry => setCode(entry.number) === code).map(entry => entry.id));
   if (state.copies.some(entry => sameCode.has(entry.catalogId))) {
-    throw new AppError('El set ' + code + ' ya está en Mis sets.', 409);
+    throw new AppError(code + ' ya está en tu colección.', 409);
   }
   const title = setTitle(name);
   const set = { id: randomUUID(), catalogId: inventory.id, name: title || inventory.name, lines: {} };
   state.copies.push(set);
   return set;
+}
+
+export function classifySet(state, copyId, value, expected) {
+  const set = state.copies.find(copy => copy.id === copyId);
+  if (!set) throw new AppError('El set ya no existe.', 404);
+  const inventory = state.catalog.find(entry => entry.id === set.catalogId);
+  if (setCode(inventory.number).startsWith('MOC-')) {
+    throw new AppError('Esta clasificación se aplica a los sets oficiales.');
+  }
+  if (!['', 'complete', 'without-minifigures', 'partial'].includes(value)) {
+    throw new AppError('Selecciona una clasificación válida.');
+  }
+  if (expected !== (set.classification ?? '')) {
+    throw new AppError('La clasificación cambió en otro dispositivo. Revísala y vuelve a intentarlo.', 409);
+  }
+  set.classification = value;
 }
 
 export function removeSet(state, copyId) {
@@ -173,10 +189,10 @@ export function removeSet(state, copyId) {
 }
 
 export function importSet(state, entry, name) {
+  const title = setTitle(name);
   const { inventory, changed } = saveInventory(state, entry);
   const set = state.copies.find(copy => copy.catalogId === inventory.id);
   if (!set) return { set: addSet(state, inventory.id, name), outcome: 'created' };
-  const title = setTitle(name);
   const renamed = Boolean(title && set.name !== title);
   if (renamed) set.name = title;
   return { set, outcome: changed || renamed ? 'updated' : 'unchanged' };

@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import { AppError, importRebrickable, parseInventory, setCode, setNumber } from '../_shared/catalog.mjs';
+import { AppError, htmlInventoryCode, importRebrickable, parseInventory, setCode, setNumber } from '../_shared/catalog.mjs';
 import { applyCommand } from '../_shared/inventory.mjs';
 import { parseRebrickableHtml } from '../_shared/rebrickable-html.mjs';
 import { addCatalog, addSet, importSet } from '../_shared/sets.mjs';
@@ -161,12 +161,8 @@ export function createHandler({ url, publicKey, dataKey, origin, ownerId, catalo
         case '/api/catalog/html': {
           if (typeof data.html !== 'string') throw new AppError('Selecciona un archivo HTML de Rebrickable.');
           if (Buffer.byteLength(data.html, 'utf8') > 2 * mb) throw new AppError('El HTML puede pesar hasta 2 MB.', 413);
-          importedCode = setCode(data.code);
           const inventory = parseRebrickableHtml(data.html);
-          const fileCode = setCode(inventory.number);
-          if (fileCode !== importedCode) {
-            throw new AppError(`El HTML corresponde al set ${fileCode} y has indicado ${importedCode}.`);
-          }
+          importedCode = htmlInventoryCode(data.code, inventory);
           const photos = data.photo === undefined ? [] : decodeSetPhotos([data.photo]);
           apply = (state, staged) => {
             const result = importSet(state, inventory, data.name);

@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { AppError, importRebrickable, parseInventory, setCode, setNumber } from './catalog.mjs';
+import { AppError, htmlInventoryCode, importRebrickable, parseInventory, setCode, setNumber } from './catalog.mjs';
 import { applyCommand } from './inventory.mjs';
 import { parseRebrickableHtml } from './rebrickable-html.mjs';
 import { addCatalog, addSet, consolidateSets, importSet } from './sets.mjs';
@@ -285,12 +285,8 @@ export async function route(request, response) {
     const data = await readJson(request, setCreationRequestLimit);
     if (typeof data.html !== 'string') throw new AppError('Selecciona un archivo HTML de Rebrickable.');
     if (Buffer.byteLength(data.html, 'utf8') > htmlLimit) throw new AppError('El HTML puede pesar hasta 2 MB.', 413);
-    const code = setCode(data.code);
     const inventory = parseRebrickableHtml(data.html);
-    const fileCode = setCode(inventory.number);
-    if (code !== fileCode) {
-      throw new AppError('El HTML corresponde al set ' + fileCode + ' y has indicado ' + code + '. Revisa el código o el archivo.');
-    }
+    const code = htmlInventoryCode(data.code, inventory);
     const photos = data.photo === undefined ? [] : decodeSetPhotos([data.photo]);
     let outcome = 'unchanged';
     const state = commit(data.requestId, current => {

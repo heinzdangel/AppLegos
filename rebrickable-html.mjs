@@ -105,9 +105,9 @@ function parseItem(values, columns, rowNumber) {
 export function parseRebrickableHtml(input) {
   const document = input.replace(/<!--[\s\S]*?-->|<(script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
   const title = content(document.match(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i)?.[1] || '');
-  const set = title.match(/^(?:Parts\s*[-–—:]\s*)?(\d{3,12}(?:-\d{1,4})?)\s*[-–—:]\s*(.{1,180})$/i);
+  const set = title.match(/^(?:Parts\s*[-–—:]\s*)?(MOC-\d{1,12}|\d{3,12}(?:-\d{1,4})?)\s*[-–—:]\s*(.{1,180})$/i);
   if (!set) {
-    throw new AppError('El título del HTML no identifica un set. Descarga «HTML Table» desde el inventario de un set en Rebrickable.');
+    throw new AppError('El título del HTML no identifica un set o MOC. Descarga «HTML Table» desde su inventario en Rebrickable.');
   }
   const number = setNumber(set[1]);
   for (const match of document.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table\s*>/gi)) {

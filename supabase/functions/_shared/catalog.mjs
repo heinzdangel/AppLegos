@@ -25,15 +25,27 @@ export class AppError extends Error {
 }
 
 export function setNumber(value) {
-  const code = String(value ?? '').trim();
+  const code = String(value ?? '').trim().toUpperCase();
+  if (/^MOC-\d{1,12}$/.test(code)) return code;
   if (!/^\d{3,12}(?:-\d{1,4})?$/.test(code)) {
-    throw new AppError('Introduce un número de set válido, por ejemplo 60411.');
+    throw new AppError('Introduce un código válido, por ejemplo 60411 o MOC-191120.');
   }
   return code.includes('-') ? code : code + '-1';
 }
 
 export function setCode(value) {
-  return setNumber(value).split('-')[0];
+  const number = setNumber(value);
+  return number.startsWith('MOC-') ? number : number.split('-')[0];
+}
+
+export function htmlInventoryCode(value, inventory) {
+  const entered = String(value ?? '').trim().toUpperCase();
+  const code = setCode(inventory.number);
+  const requested = code.startsWith('MOC-') && /^\d{1,12}$/.test(entered) ? 'MOC-' + entered : setCode(entered);
+  if (requested !== code) {
+    throw new AppError('El HTML corresponde a ' + code + ' y has indicado ' + requested + '. Revisa el código o el archivo.');
+  }
+  return code;
 }
 
 export function lineId(item) {
@@ -171,6 +183,7 @@ async function allPages(path, key) {
 export async function importRebrickable(value, key) {
   if (!key) throw new AppError('Configura REBRICKABLE_API_KEY en el servidor o importa un CSV.');
   const number = setNumber(value);
+  if (number.startsWith('MOC-')) throw new AppError('Para añadir un MOC, importa su inventario HTML de Rebrickable.');
   const path = 'lego/sets/' + encodeURIComponent(number) + '/';
   const set = await rebrickable(path, key);
   const [parts, figures] = await Promise.all([

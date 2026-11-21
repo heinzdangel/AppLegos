@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { AppError, pieceId } from './catalog.mjs';
-import { addSet, removeSet } from './sets.mjs';
+import { addSet, classifySet, removeSet } from './sets.mjs';
 
 export function lineProgress(copy, item) {
   const line = copy.lines[item.id];
@@ -67,6 +67,9 @@ export function applyCommand(state, command) {
       break;
     case 'remove-copy':
       removeSet(state, command.copyId);
+      break;
+    case 'classify-set':
+      classifySet(state, command.copyId, command.classification, command.expected);
       break;
     case 'set-photo-cover': {
       const set = state.copies.find(entry => entry.id === command.copyId);

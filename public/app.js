@@ -21,7 +21,6 @@ if (pagesMode && configuredOrigin) {
 }
 let pagesToken = '';
 let pagesLoginWindow;
-let otpEmail = '';
 let refreshToken = '';
 let sessionExpires = 0;
 let refreshingToken;
@@ -36,7 +35,7 @@ let countQueue = Promise.resolve();
 let dialogRestore;
 const ui = {
   page: 'sets', copy: '', box: '', item: '', focusPiece: '', query: '',
-  color: '', status: 'all', setStatus: 'all', group: 'color', closedUsage: true,
+  color: '', status: 'all', setStatus: 'all', classification: 'all', group: 'color', closedUsage: true,
 };
 
 const setStates = {
@@ -44,6 +43,13 @@ const setStates = {
   unreviewed: { label: 'Por revisar', plural: 'Por revisar', tone: '' },
   reviewing: { label: 'En revisión', plural: 'En revisión', tone: 'working' },
   incomplete: { label: 'Incompleto', plural: 'Incompletos', tone: 'need' },
+};
+
+const classifications = {
+  '': 'Sin clasificar',
+  complete: 'Set completo',
+  'without-minifigures': 'Set sin personajes',
+  partial: 'Set parcial',
 };
 
 function html(value) {
@@ -57,6 +63,9 @@ function textKey(value) {
 
 const pieceId = item => JSON.stringify([item.type, item.part, item.colorId]);
 const catalogOf = copy => data.catalog.find(entry => entry.id === copy.catalogId);
+const isMoc = inventory => inventory.number.startsWith('MOC-');
+const collectionPage = copy => isMoc(catalogOf(copy)) ? 'mocs' : 'sets';
+const codeOf = inventory => isMoc(inventory) ? inventory.number : inventory.number.split('-')[0];
 const activeCopy = () => data.copies.find(copy => copy.id === ui.copy);
 const activeBox = () => data.boxes.find(box => box.id === ui.box);
 const format = new Intl.NumberFormat('es').format;
@@ -244,6 +253,7 @@ async function supabaseAuth(path, body) {
   if (!response.ok) {
     const error = new Error(result.msg || result.error_description || 'No se pudo completar el acceso.');
     error.status = response.status;
+    error.code = result.error_code;
     throw error;
   }
   return result;
@@ -399,22 +409,23 @@ async function mutate(action, payload = {}, settings = {}) {
 }
 
 function takeAfterAction(action, settings) {
-  if (action === 'add-copy') selectPage('sets', { copy: data.copies.at(-1).id });
+  if (action === 'add-copy') selectPage(collectionPage(data.copies.at(-1)), { copy: data.copies.at(-1).id });
   if (action === 'add-box') selectPage('boxes', { box: data.boxes.at(-1).id });
-  if (action === 'remove-copy') selectPage('sets');
+  if (action === 'remove-copy') selectPage(ui.page);
   if (settings.after) settings.after(data);
 }
 
 function htmlImportResult(fresh, code) {
   if (fresh.importedSet?.id) {
     const { id, outcome } = fresh.importedSet;
-    if (outcome === 'created') return { id, message: `Set ${code} añadido a Mis sets.` };
-    if (outcome === 'updated') return { id, message: `Set ${code} actualizado.` };
-    return { id, message: `El set ${code} ya coincide con el HTML.` };
+    const label = fresh.importedSet.code || code;
+    if (outcome === 'created') return { id, message: `${label} añadido a tu colección.` };
+    if (outcome === 'updated') return { id, message: `${label} actualizado.` };
+    return { id, message: `${label} ya coincide con el HTML.` };
   }
   // Older servers import into the catalog without creating or updating the set.
   const inventory = fresh.catalog.find(entry => entry.id === fresh.importedCatalogId);
-  if (inventory?.number.split('-')[0] === code) {
+  if (inventory && codeOf(inventory) === code) {
     const copy = fresh.copies.find(entry => entry.catalogId === inventory.id);
     if (copy) return { id: copy.id, message: `El set ${code} ya coincide con el HTML.` };
     return { message: `El inventario de ${code} está en el catálogo. Reinicia el servidor y vuelve a importar el HTML para aplicarlo en «Mis sets».` };
@@ -434,12 +445,10 @@ function renderAccess(login) {
   shell.hidden = true;
   access.hidden = false;
   access.innerHTML = `<section class="access-card"><img src="./icon.svg" alt="" width="60" height="60">
-    <h1>Inventario LEGO</h1>${login && supabase ? (otpEmail ?
-    `<form data-form="supabase-otp"><p>Introduce el código enviado a ${html(otpEmail)}.</p>
-      <label>Código de acceso<input name="token" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" required></label>
-      <button class="primary">Entrar</button><button type="button" data-action="supabase-change-email">Volver</button></form>` :
-    `<form data-form="supabase-email"><label>Correo de acceso<input type="email" name="email" autocomplete="email" required></label>
-      <button class="primary">Enviar código</button></form>`) : login && pagesMode ?
+    <h1>Inventario LEGO</h1>${login && supabase ?
+    `<form data-form="supabase-password"><label>Correo de acceso<input type="email" name="email" autocomplete="username" required></label>
+      <label>Contraseña<input type="password" name="password" autocomplete="current-password" required></label>
+      <button class="primary">Entrar</button></form>` : login && pagesMode ?
     '<button class="primary" type="button" data-action="pages-login">Entrar a mi inventario</button>' : login ?
     `<form data-form="login"><label>Contraseña de la colección<input type="password" name="password" autocomplete="current-password" required></label><button class="primary">Entrar</button></form>` : pagesMode && !serverOrigin ?
     '<p>Completa la configuración de acceso en docs/config.js.</p>' :
@@ -498,36 +507,46 @@ function loadSetPhotoImages(container) {
 }
 
 function setOverview() {
-  const actions = '<button type="button" data-action="import-html">Importar HTML</button><button type="button" data-action="import">Importar CSV</button><button type="button" class="primary" data-action="open-add">Añadir set</button>';
-  const title = header('Mis sets', actions);
-  if (!data.copies.length) {
-    return title + blank('Todavía no tienes sets en tu colección',
-      'Añade un set nuevo desde el catálogo o importa su inventario de Rebrickable.');
+  const moc = ui.page === 'mocs';
+  const actions = `<button type="button" data-action="import-html">Importar HTML</button><button type="button" data-action="import">Importar CSV</button><button type="button" class="primary" data-action="open-add">Añadir ${moc ? 'MOC' : 'set'}</button>`;
+  const title = header(moc ? 'Mis MOC' : 'Mis sets', actions);
+  const collection = data.copies.filter(copy => isMoc(catalogOf(copy)) === moc);
+  if (!collection.length) {
+    return title + blank(`Todavía no tienes ${moc ? 'MOC' : 'sets'} en tu colección`,
+      'Añade uno desde el catálogo o importa su inventario HTML de Rebrickable.');
   }
 
-  const summaries = data.copies.map(setSummary);
-  const filtered = summaries.filter(set => ui.setStatus === 'all' || set.state === ui.setStatus);
+  const summaries = collection.map(setSummary);
+  const filtered = summaries.filter(set => (ui.setStatus === 'all' || set.state === ui.setStatus) &&
+    (moc || ui.classification === 'all' || (set.copy.classification ?? '') === ui.classification));
   const options = [['all', 'Todos'], ...Object.entries(setStates).map(([id, state]) => [id, state.plural])];
-  const filters = `<div class="filters"><label class="select-label">Estado del set
+  const filters = `<div class="filters"><label class="select-label">Estado de revisión
     <select data-filter="setStatus">${options.map(([id, label]) =>
       `<option value="${id}"${id === ui.setStatus ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
-    <span class="subheading set-results" role="status">${format(filtered.length)} de ${format(summaries.length)} sets</span></div>`;
+    ${moc ? '' : `<label class="select-label">Clasificación<select data-filter="classification"><option value="all">Todas</option>${classificationOptions(ui.classification)}</select></label>`}
+    <span class="subheading set-results" role="status">${format(filtered.length)} de ${format(summaries.length)} ${moc ? 'MOC' : 'sets'}</span></div>`;
   const cards = filtered.map(({ copy, inventory, references, reviewed, missing, state }) => {
     const cover = copy.coverPhotoId ? setPhotoSource(copy.coverPhotoId) :
       inventory.image ? `src="${html(inventory.image)}"` : '';
     const lead = cover ? `<img ${cover} alt="" loading="lazy">` :
-      `<span class="set-mark" aria-hidden="true">${html(inventory.number.split('-')[0])}</span>`;
+      `<span class="set-mark" aria-hidden="true">${html(codeOf(inventory))}</span>`;
     return `<button type="button" class="set-card" data-action="copy" data-value="${html(copy.id)}">
       <span class="set-visual">${lead}</span>
       <span class="set-body"><span class="set-meta"><span>${html(inventory.number)}</span>${setStatePill(state)}</span>
       <strong>${html(copy.name)}</strong>${inventory.partial ? '<span>Inventario parcial</span>' : ''}
+      ${!moc && copy.classification ? `<span>Clasificación · ${html(classifications[copy.classification])}</span>` : ''}
       <span>${format(reviewed)} de ${format(references)} referencias revisadas</span>
       <progress value="${reviewed}" max="${references || 1}" aria-label="Referencias revisadas"></progress>
       ${missing ? `<span class="negative">${quantityText(missing)} por reponer</span>` : ''}
       </span></button>`;
   }).join('');
   return title + filters + (cards ? `<div class="card-grid">${cards}</div>` :
-    blank('No hay sets con este estado', 'Selecciona otro estado para ver más sets.'));
+    blank('No hay resultados con estos filtros', 'Cambia el estado de revisión o la clasificación.'));
+}
+
+function classificationOptions(selected) {
+  return Object.entries(classifications).map(([value, label]) =>
+    `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`).join('');
 }
 
 function setStatePill(state) {
@@ -536,7 +555,9 @@ function setStatePill(state) {
 }
 
 function statisticsView() {
-  const sets = data.copies.map(setSummary);
+  const kind = ui.statsKind || 'all';
+  const collection = data.copies.filter(copy => kind === 'all' || isMoc(catalogOf(copy)) === (kind === 'mocs'));
+  const sets = collection.map(setSummary);
   const counts = { complete: 0, unreviewed: 0, reviewing: 0, incomplete: 0 };
   const totals = { references: 0, reviewed: 0, required: 0, recorded: 0, missing: 0, withMissing: 0 };
   for (const set of sets) {
@@ -550,15 +571,21 @@ function statisticsView() {
   }
 
   const metric = (label, value) => `<span>${label}</span><strong>${format(value)}</strong>`;
-  const statusMetric = (id, label, count) => `<button type="button" class="stats-card" data-action="show-set-status" data-value="${id}">${metric(label, count)}</button>`;
+  const statusMetric = (id, label, count) => {
+    if (kind === 'all') return `<div class="stats-card">${metric(label, count)}</div>`;
+    return `<button type="button" class="stats-card" data-action="show-set-status" data-kind="${kind}" data-value="${id}">${metric(label, count)}</button>`;
+  };
   const closest = sets.filter(set => set.state === 'incomplete').sort((a, b) =>
     a.missing - b.missing || compare(a.copy.name, b.copy.name)).slice(0, 5);
   const reviewPercent = totals.references ? Math.floor(totals.reviewed / totals.references * 100) : 0;
-  return header('Estadísticas', '') + `
-    <section class="stats-section" aria-labelledby="stats-sets"><h2 id="stats-sets">Mis sets</h2>
-      <div class="stats-grid">${statusMetric('all', 'Total de sets', sets.length)}
+  return header('Estadísticas', '') + `<div class="filters"><label class="select-label">Colección<select data-filter="statsKind">
+    ${[['all', 'Sets y MOC'], ['sets', 'Sets oficiales'], ['mocs', 'MOC']].map(([value, label]) =>
+      `<option value="${value}"${value === kind ? ' selected' : ''}>${label}</option>`).join('')}</select></label></div>
+    <section class="stats-section" aria-labelledby="stats-sets"><h2 id="stats-sets">Colección</h2>
+      <div class="stats-grid"><div class="stats-card">${metric('Total de sets', sets.filter(set => !isMoc(set.inventory)).length)}</div>
+      <div class="stats-card">${metric('Total de MOC', sets.filter(set => isMoc(set.inventory)).length)}</div>
       ${Object.entries(setStates).map(([id, state]) => statusMetric(id, state.plural, counts[id])).join('')}
-      <div class="stats-card">${metric('Sets con faltantes confirmados', totals.withMissing)}</div></div>
+      <div class="stats-card">${metric('Con faltantes confirmados', totals.withMissing)}</div></div>
     </section>
     <section class="stats-section" aria-labelledby="stats-pieces"><h2 id="stats-pieces">Piezas y revisión</h2>
       <div class="stats-grid">
@@ -573,7 +600,7 @@ function statisticsView() {
         ${sets.some(set => set.inventory.partial) ? '<p class="subheading">Los inventarios parciales aportan solo las referencias cargadas.</p>' : ''}
       </div>
     </section>
-    ${closest.length ? `<section class="stats-section" aria-labelledby="stats-closest"><h2 id="stats-closest">Sets más cerca de completar</h2>
+    ${closest.length ? `<section class="stats-section" aria-labelledby="stats-closest"><h2 id="stats-closest">Más cerca de completar</h2>
       <div class="panel stats-list">${closest.map(({ copy, inventory, missing }) =>
         `<button type="button" data-action="copy" data-value="${html(copy.id)}"><span><strong>${html(copy.name)}</strong>
         <small>${html(inventory.number)}</small></span><span class="pill need">${missing === 1 ? 'Falta 1' : `Faltan ${format(missing)}`}</span></button>`).join('')}</div>
@@ -599,6 +626,7 @@ function rowCountControls(item, status) {
 
 function setDetail(copy) {
   const inventory = catalogOf(copy);
+  const moc = isMoc(inventory);
   const regular = inventory.items.filter(item => !item.spare && item.type === 'part');
   const figures = inventory.items.filter(item => item.type === 'minifig' && !item.spare);
   const spares = inventory.items.filter(item => item.spare);
@@ -612,13 +640,15 @@ function setDetail(copy) {
   const tabs = [['all', 'Piezas'], ['review', 'Por revisar'], ['confirmed', 'Con faltantes']];
   if (figures.length) tabs.push(['figures', 'Minifiguras']);
   if (spares.length) tabs.push(['spares', 'Repuestos']);
-  const back = '<button type="button" class="text-button" data-action="page" data-value="sets">← Mis sets</button>';
-  const label = `<div class="set-meta"><p class="subheading">${html(inventory.number)} · ${html(inventory.source)} · ${html(inventory.version)}</p>${setStatePill(setSummary(copy).state)}</div>`;
+  const back = `<button type="button" class="text-button" data-action="page" data-value="${moc ? 'mocs' : 'sets'}">← Mis ${moc ? 'MOC' : 'sets'}</button>`;
+  const label = `<div class="set-meta"><p class="subheading">${html(inventory.number)} · ${html(inventory.source)} · ${html(inventory.version)}</p>${setStatePill(setSummary(copy).state)}
+    ${!moc && copy.classification ? `<span class="pill">${html(classifications[copy.classification])}</span>` : ''}</div>`;
   const showDetail = !ui.setDetailHidden;
   const side = showDetail ? (item ? setItemDetail(copy, item) : blank('Selecciona una pieza')) : '';
   const detailToggle = `<button type="button" data-action="toggle-set-detail" aria-controls="set-piece-detail" aria-expanded="${showDetail}">${showDetail ? 'Ocultar detalle' : 'Mostrar detalle'}</button>`;
-  const photos = `<button type="button" data-action="set-photos" data-value="${html(copy.id)}">Fotos del set${copy.photos?.length ? ` (${copy.photos.length})` : ''}</button>`;
-  return header(copy.name, photos + detailToggle + '<button type="button" data-action="remove-copy">Eliminar set</button>', back) + label +
+  const photos = `<button type="button" data-action="set-photos" data-value="${html(copy.id)}">Fotos del ${moc ? 'MOC' : 'set'}${copy.photos?.length ? ` (${copy.photos.length})` : ''}</button>`;
+  const classify = moc ? '' : '<button type="button" data-action="classify-set">Clasificar set</button>';
+  return header(copy.name, photos + classify + detailToggle + `<button type="button" data-action="remove-copy">Eliminar ${moc ? 'MOC' : 'set'}</button>`, back) + label +
     (inventory.partial ? '<p class="banner">Inventario de muestra · Solo incluye una selección de referencias.</p>' : '') +
     searchBar(pool, setListControls(pool)) +
     `<div class="tabs" aria-label="Vista del inventario">${tabs.map(([value, title]) =>
@@ -662,7 +692,7 @@ function setPieceRelations(item) {
   const missing = matches.filter(entry => entry.reviewed && entry.missing > 0);
   const uses = matches.filter(entry => entry.total > 0);
   const sections = [
-    ['missing', 'En qué sets falta', missing, 'No hay faltantes confirmados para esta pieza.',
+    ['missing', 'En qué sets o MOC falta', missing, 'No hay faltantes confirmados para esta pieza.',
       entry => `Faltan ${quantityText(entry.missing)}`],
     ['usage', 'Dónde la estoy utilizando', uses, 'No hay unidades registradas para esta pieza.',
       entry => quantityText(entry.total)],
@@ -681,7 +711,7 @@ function boxesOverview() {
       `<button type="button" class="box-card" data-action="box" data-value="${box.id}">
       <span aria-hidden="true" class="box-mark">▤</span><strong>${html(box.name)}</strong>
       <span>${Object.keys(box.pieces).length} referencias · ${quantityText(Object.values(box.pieces).reduce((a, b) => a + b, 0))}</span>
-      </button>`).join('')}</div>` : blank('Aún no hay cajas', 'Crea una caja para registrar piezas mezcladas y repartirlas entre tus sets.'));
+      </button>`).join('')}</div>` : blank('Aún no hay cajas', 'Crea una caja para registrar piezas mezcladas y repartirlas entre tus sets y MOC.'));
 }
 
 function boxStatus(box, item) {
@@ -731,7 +761,7 @@ function boxItemDetail(box, item) {
           ${limit ? '<button type="submit" name="mode" value="assign">Asignar</button>' : ''}
           ${assigned ? '<button type="submit" name="mode" value="return">Devolver</button>' : ''}
         </form>` : ''}</div>`;
-    }).join('') : '<p class="subheading">Ningún set de tu colección tiene esta referencia y color.</p>'}</div>`;
+    }).join('') : '<p class="subheading">Ningún set o MOC de tu colección tiene esta referencia y color.</p>'}</div>`;
 }
 
 function missingView(all) {
@@ -780,12 +810,12 @@ function missingDetail(item) {
     ${photo(item, 'large')}<div><h2>${html(item.name)}</h2>
     <p class="subheading">${html(item.part)} · ${colorLabel(item)}${item.element ? ` · LEGO ${html(item.element)}` : ''}</p></div>
     <div class="total-missing"><strong>${format(item.sum)}</strong> faltan en total</div>
-    <h3>En qué sets falta</h3>${item.copies.map(entry =>
+    <h3>En qué sets o MOC falta</h3>${item.copies.map(entry =>
       `<div class="detail-line"><button type="button" class="text-button" data-action="copy" data-value="${entry.copy.id}" data-item="${html(entry.item.id)}">${html(entry.copy.name)}<small>${html(catalogOf(entry.copy).number)}</small></button>
       <span>Faltan <strong>${format(entry.missing)}</strong> de ${format(entry.item.needed)}</span></div>`).join('')}
     <details id="usage-panel"${ui.closedUsage ? '' : ' open'}><summary>Dónde la estoy usando</summary>
     ${uses.map(entry => `<div class="detail-line"><span>${html(entry.copy.name)} <small>${html(catalogOf(entry.copy).number)}</small></span><strong>${quantityText(entry.total)}</strong></div>`).join('') ||
-      (ui.closedUsage ? '' : '<p class="subheading">No hay unidades registradas en tus sets.</p>')}</details>
+      (ui.closedUsage ? '' : '<p class="subheading">No hay unidades registradas en tu colección.</p>')}</details>
   </div>`;
 }
 
@@ -827,10 +857,10 @@ function catalogPieceDetail(item) {
     <button class="text-button" type="button" data-action="close-detail">Cerrar detalle ×</button>
     ${photo(item, 'large')}<div><h2>${html(item.name)}</h2>
     <p class="subheading">${html(item.part)} · ${colorLabel(item)}${item.element ? ` · LEGO ${html(item.element)}` : ''}</p></div>
-    ${models.size ? `<h3>Sets del catálogo que llevan esta pieza</h3>
+    ${models.size ? `<h3>Sets y MOC del catálogo que llevan esta pieza</h3>
     ${[...models.values()].sort((a, b) => compare(a.number, b.number)).map(inventory =>
       `<div class="detail-line"><span>${html(inventory.name)} <small>${html(inventory.number)}${inventory.partial ? ' · Muestra' : ''}</small></span></div>`).join('')}` : ''}
-    ${copies.length ? `<h3>En Mis sets</h3>${copies.map(({ copy, item: line, total }) =>
+    ${copies.length ? `<h3>En mi colección</h3>${copies.map(({ copy, item: line, total }) =>
       `<div class="detail-line"><button type="button" class="text-button" data-action="copy" data-value="${copy.id}" data-item="${html(line.id)}">${html(copy.name)}</button>
       <span>${format(total)} de ${format(line.needed)} registradas</span></div>`).join('')}` : ''}
   </div>`;
@@ -849,7 +879,7 @@ function render() {
   });
   const current = activeCopy();
   const box = activeBox();
-  if (ui.page === 'sets') page.innerHTML = current ? setDetail(current) : setOverview();
+  if (ui.page === 'sets' || ui.page === 'mocs') page.innerHTML = current ? setDetail(current) : setOverview();
   if (ui.page === 'boxes') page.innerHTML = box ? boxDetail(box) : boxesOverview();
   if (ui.page === 'missing') page.innerHTML = missingView(allMissing);
   if (ui.page === 'pieces') page.innerHTML = piecesView();
@@ -884,11 +914,11 @@ function confirmSetRemoval(set, final = false) {
   if (!set) return dialog.close();
   const name = html(set.name);
   const cancel = '<button type="button" data-action="close-dialog" data-remove-cancel>Cancelar</button>';
-  renderDialog(final ? 'Última confirmación' : 'Eliminar set', final ?
+  renderDialog(final ? 'Última confirmación' : `Eliminar ${isMoc(catalogOf(set)) ? 'MOC' : 'set'}`, final ?
     `<p>¿Confirmas que quieres borrar <strong>${name}</strong> definitivamente? Se eliminarán su listado, recuento y fotos. Las referencias seguirán en «Piezas» y las unidades asignadas volverán a estar disponibles en sus cajas.</p>
     <form data-form="remove-copy-confirmed" data-copy="${html(set.id)}"><div class="detail-actions">
       ${cancel}<button type="submit" class="danger">Sí, eliminar definitivamente</button></div></form>` :
-    `<p>¿Quieres eliminar <strong>${name}</strong> de Mis sets?</p><div class="detail-actions">
+    `<p>¿Quieres eliminar <strong>${name}</strong> de tu colección?</p><div class="detail-actions">
       ${cancel}<button type="button" class="danger" data-action="confirm-set-removal" data-value="${html(set.id)}">Sí, continuar</button></div>`);
   dialogContent.querySelector('[data-remove-cancel]')?.focus();
 }
@@ -910,7 +940,7 @@ function showSetPhotos(copyId, photoId) {
     <figcaption>${html(selected.name)}${selected.id === set.coverPhotoId ? ' · Foto principal' : ''}</figcaption>
   </figure>${selected.id === set.coverPhotoId ? '' : `<button type="button" class="set-photo-cover" data-action="set-photo-cover"
     data-copy="${setId}" data-value="${html(selected.id)}">Marcar como principal</button>`}` :
-    '<p class="subheading">La primera foto que añadas aparecerá en Mis sets.</p>';
+    '<p class="subheading">La primera foto que añadas aparecerá en la tarjeta de tu colección.</p>';
   const thumbnails = photos.length > 1 ? `<div class="set-photo-gallery" role="group" aria-label="Galería">
     ${photos.map((photo, index) => `<button type="button" data-action="set-photos" data-value="${setId}" data-photo="${html(photo.id)}"
       aria-pressed="${photo.id === selected.id}" aria-label="${html(`Ver foto ${index + 1}: ${photo.name}`)}">
@@ -963,8 +993,8 @@ async function uploadSetPhotos(form, files) {
 }
 
 function setDetailsFields() {
-  return `<label>Nombre del set (opcional)<input name="name" maxlength="90" placeholder="Ej. Grandes dinosaurios"></label>
-    <label>Foto principal del set (opcional)<input type="file" name="photo" accept="image/jpeg,image/png,image/webp,image/gif"></label>
+  return `<label>Nombre (opcional)<input name="name" maxlength="90" placeholder="Ej. Grandes dinosaurios"></label>
+    <label>Foto principal (opcional)<input type="file" name="photo" accept="image/jpeg,image/png,image/webp,image/gif"></label>
     <p class="subheading">JPG, PNG, WebP o GIF de hasta 10 MB.</p>`;
 }
 
@@ -1001,7 +1031,8 @@ async function submitSet(form, input) {
       path: '/api/catalog/html', close: true,
       after: fresh => {
         result = htmlImportResult(fresh, code);
-        selectPage('sets', { copy: result.id || '' });
+        const saved = fresh.copies.find(copy => copy.id === result.id);
+        selectPage(saved ? collectionPage(saved) : ui.page, { copy: result.id || '' });
       },
       message: () => result.message,
     });
@@ -1013,10 +1044,11 @@ async function submitSet(form, input) {
 }
 
 function addDialog() {
-  const codeOf = entry => entry.number.split('-')[0];
+  const moc = ui.page === 'mocs';
   const taken = new Set(data.copies.map(set => codeOf(catalogOf(set))));
   const available = new Map();
   for (const entry of data.catalog) {
+    if (isMoc(entry) !== moc) continue;
     const code = codeOf(entry);
     if (taken.has(code)) continue;
     const previous = available.get(code);
@@ -1024,16 +1056,17 @@ function addDialog() {
   }
   const catalog = [...available.values()].sort((a, b) => compare(a.number, b.number));
   const choices = catalog.length ? `<form data-form="add-copy">
-    <label>Código del set<select name="catalogId" required>${catalog.map(entry =>
+    <label>Código del ${moc ? 'MOC' : 'set'}<select name="catalogId" required>${catalog.map(entry =>
       `<option value="${html(entry.id)}">${html(entry.number)} · ${html(entry.name)} · ${html(entry.source)} · ${html(entry.version)}${entry.partial ? ' (parcial)' : ''}</option>`).join('')}</select></label>
     ${setDetailsFields()}
-    <button type="submit" class="primary">Añadir a Mis sets</button></form>` :
-    '<p class="subheading">Importa el inventario del set que quieres añadir.</p>';
-  renderDialog('Añadir set', `${choices}<hr><form data-form="rebrickable">
+    <button type="submit" class="primary">Añadir a Mis ${moc ? 'MOC' : 'sets'}</button></form>` :
+    '<p class="subheading">Importa el inventario que quieres añadir.</p>';
+  const api = moc ? '' : `<hr><form data-form="rebrickable">
     <label>Número de set en Rebrickable<input name="number" required placeholder="Ej. 60411"${data.liveCatalog ? '' : ' disabled'}></label>
     <button${data.liveCatalog ? '' : ' disabled'}>Cargar del catálogo</button>
     ${data.liveCatalog ? '' : '<p class="subheading">API pendiente de configuración. También puedes cargar un archivo de inventario.</p>'}
-    </form><button type="button" data-action="import-html">Importar HTML de un set</button>`);
+    </form>`;
+  renderDialog(moc ? 'Añadir MOC' : 'Añadir set', `${choices}${api}<button type="button" data-action="import-html">Importar HTML de Rebrickable</button>`);
 }
 
 function csvCell(value) {
@@ -1097,14 +1130,14 @@ document.addEventListener('click', async event => {
   switch (action) {
     case 'page': selectPage(value); render(); break;
     case 'show-set-status':
-      selectPage('sets', { setStatus: value });
+      selectPage(target.dataset.kind || 'sets', { setStatus: value, classification: 'all' });
       render();
       page.querySelector('[data-filter="setStatus"]')?.focus();
       break;
     case 'copy': {
       const copy = data.copies.find(entry => entry.id === value);
       const item = catalogOf(copy).items.find(entry => entry.id === itemId);
-      selectPage('sets', { copy: value, item: itemId || '', status: item?.type === 'minifig' ? 'figures' : 'all' });
+      selectPage(collectionPage(copy), { copy: value, item: itemId || '', status: item?.type === 'minifig' ? 'figures' : 'all' });
       render();
       break;
     }
@@ -1130,10 +1163,18 @@ document.addEventListener('click', async event => {
     case 'catalog-page': ui.catalogPage = Number(value); ui.focusPiece = ''; render(); break;
     case 'close-detail': ui.focusPiece = ''; render(); break;
     case 'open-add': addDialog(); break;
+    case 'classify-set': {
+      const copy = activeCopy();
+      renderDialog('Clasificar set', `<form data-form="classify-set" data-copy="${html(copy.id)}" data-expected="${html(copy.classification ?? '')}">
+        <label>Clasificación del set<select name="classification">${classificationOptions(copy.classification ?? '')}</select></label>
+        <p class="subheading">Esta etiqueta describe tu colección. El estado de revisión se calcula con los recuentos de piezas.</p>
+        <button type="submit" class="primary">Guardar clasificación</button></form>`);
+      break;
+    }
     case 'import-html': renderDialog('Importar HTML de Rebrickable', `<form data-form="import-html">
-      <label>Código del set<input name="code" inputmode="numeric" pattern="[0-9]{3,12}" required placeholder="Ej. 31058" autofocus></label>
+      <label>Código del set o MOC<input name="code" pattern="([0-9]{3,12}(-[0-9]{1,4})?|[Mm][Oo][Cc]-[0-9]{1,12})" required placeholder="Ej. 31058 o MOC-191120" autofocus></label>
       <label>Archivo de inventario<input name="inventory" type="file" accept=".html,.htm,text/html" required></label>
-      <p class="subheading">Usa el archivo de «Export Parts» → «HTML Table». El código indicado debe coincidir con el set del archivo.</p>
+      <p class="subheading">Usa «Export Parts» → «HTML Table». El tipo se detecta del archivo. Para un MOC puedes indicar su número o el código MOC completo.</p>
       ${setDetailsFields()}
       <button type="submit" class="primary">Importar HTML</button></form>`); break;
     case 'import': renderDialog('Importar inventario CSV', `<form data-form="import">
@@ -1165,10 +1206,6 @@ document.addEventListener('click', async event => {
       pagesLoginWindow = window.open(serverOrigin + '/pages-login', 'inventario-lego-acceso', 'popup,width=470,height=430');
       if (!pagesLoginWindow) showNotice('Permite la ventana de acceso para entrar al inventario.', true);
       break;
-    case 'supabase-change-email':
-      otpEmail = '';
-      renderAccess(true);
-      break;
     case 'logout':
       try {
         if (!pagesMode) await api('/api/logout', {});
@@ -1188,22 +1225,22 @@ document.addEventListener('submit', async event => {
   event.preventDefault();
   const input = new FormData(form);
   const mode = form.dataset.form;
-  if (mode === 'supabase-email' || mode === 'supabase-otp') {
+  if (mode === 'supabase-password') {
     const submit = form.querySelector('button');
+    if (submit.disabled) return;
     submit.disabled = true;
     try {
-      if (mode === 'supabase-email') {
-        const email = input.get('email').trim();
-        await supabaseAuth('otp', { email, create_user: false });
-        otpEmail = email;
-        renderAccess(true);
-      } else {
-        useSupabaseSession(await supabaseAuth('verify', { email: otpEmail, token: input.get('token'), type: 'email' }));
-        otpEmail = '';
-        await refresh(true);
-      }
+      const email = input.get('email').trim();
+      const password = input.get('password');
+      useSupabaseSession(await supabaseAuth('token?grant_type=password', { email, password }));
+      form.reset();
+      await refresh(true);
     } catch (error) {
-      showNotice(error.message, true);
+      const messages = {
+        invalid_credentials: 'El correo o la contraseña son incorrectos.',
+        email_not_confirmed: 'Confirma este usuario en Authentication → Users de Supabase para poder entrar.',
+      };
+      showNotice(messages[error.code] || error.message, true);
     } finally {
       submit.disabled = false;
     }
@@ -1217,6 +1254,9 @@ document.addEventListener('submit', async event => {
     }
   }
   if (mode === 'add-copy' || mode === 'import-html') await submitSet(form, input);
+  if (mode === 'classify-set') await mutate('classify-set', {
+    copyId: form.dataset.copy, classification: input.get('classification'), expected: form.dataset.expected,
+  }, { close: true });
   if (mode === 'set-photos-upload') await uploadSetPhotos(form, input.getAll('photos'));
   if (mode === 'add-box') await mutate('add-box', { name: input.get('name') }, { close: true });
   if (mode === 'remove-copy-confirmed') await mutate('remove-copy', { copyId: form.dataset.copy }, { close: true });
